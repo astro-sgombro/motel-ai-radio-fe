@@ -102,6 +102,25 @@
     </div>
   </section>
 
+    <!-- ====== SEZIONE D) PILOT AUTOMATICO ====== -->
+  <section aria-labelledby="sec-auto">
+    <h2 id="sec-auto">D) Pilot automatico: Intro → poi brano</h2>
+    <p class="muted">
+      Usa l’URI/link del campo in A) (oppure leggo la traccia attuale dal tuo account).<br/>
+      Sequenza: genera intro → TTS → riproduci intro → al termine avvia il brano.
+    </p>
+
+    <div class="row" style="margin-top:8px;">
+      <button id="btnAutoPlay">▶ Auto Play con Intro</button>
+      <button id="btnAutoStop" class="secondary">⏹ Stop</button>
+    </div>
+
+    <div class="muted" style="margin-top:8px;">
+      Suggerimento: incolla un link/URI nel campo “Incolla link/URI” in A) e premi “Auto Play con Intro”.
+    </div>
+  </section>
+
+
   <!-- ====== Errori + Player audio TTS ====== -->
   <div id="error" role="alert" aria-live="polite"></div>
   <audio id="player" controls></audio>
@@ -432,6 +451,143 @@ $("#btnTextAndTts").addEventListener("click", async () => {
 });
 
 /* All’avvio: se torni da login con ?code=..., sarà gestito dentro getValidToken() quando inizializzi il player. */
+
+/* ========================================================================
+   PILOT AUTOMATICO
+   ------------------------------------------------------------------------
+   Razionale:
+   - Evitiamo di far partire la musica finché il parlato non è terminato.
+   - Usiamo l'input "uriInput" se presente; altrimenti fallback alla traccia
+     corrente dell’utente via /v1/me/player/currently-playing.
+   - Disabilitiamo i pulsanti durante la sequenza per evitare doppi click.
+   ======================================================================== */
+
+/** Piccola utility: riproduci un Blob TTS e poi esegui una callback */
+async function playBlobAndThen(blob, onEnd) {
+  // Pausa preventiva del player Spotify per non sovrapporre suoni
+  try { await apiSpotify("me/player/pause", "PUT"); } catch(_) {}
+  // Ducking + riproduzione
+  const url = URL.createObjectURL(blob);
+  audioEl.src = url;
+
+  // Ducking: abbassa il volume se il player è attivo
+  let prevVol = lastVolume;
+  try {
+    if (player) {
+      try { prevVol = await player.getVolume(); } catch(_) {}
+      await player.setVolume(Math.max(0.05, prevVol * 0.25));
+    }
+  } catch(_) {}
+
+  // Avvia TTS
+  try { await audioEl.play(); } catch(_) {}
+
+  audioEl.onended = async () => {
+    URL.revokeObjectURL(url);
+    // Ripristina volume
+    if (player) {
+      try { await player.setVolume(prevVol); lastVolume = prevVol; } catch(_) {}
+    }
+    // Avvia callback finale (es. “play brano Spotify”)
+    if (typeof onEnd === "function") {
+      try { await onEnd(); } catch(e) { setError(e.message || "Errore post-TTS"); }
+    }
+  };
+}
+
+/** Ritorna info traccia a partire da input A) (uriInput) o dalla "currently playing" */
+async function resolveTrackForAuto() {
+  // 1) Prova dall’input in sezione A)
+  const raw = $("#uriInput")?.value?.trim();
+  const parsed = raw ? parseSpotifyInput(raw) : null;
+  if (parsed && (parsed.uri || parsed.context_uri)) {
+    // Normalizziamo: il pilot ha senso su UNA singola traccia.
+    if (parsed.uri && parsed.uri.startsWith("spotify:track:")) {
+      const id = parsed.uri.split(":").pop();
+      return {
+        trackUri: parsed.uri,
+        trackUrl: `https://open.spotify.com/track/${id}`
+      };
+    }
+    // Se utente ha messo playlist/album, non possiamo avere "link traccia" certo.
+    // In questo caso proviamo la "currently playing" come fallback.
+  }
+
+  // 2) Fallback: traccia corrente dell’utente via API
+  //    NB: richiede che tu abbia un player già trasferito al tuo device.
+  const data = await apiSpotify("me/player/currently-playing", "GET");
+  if (!data || !data.item || !data.item.id) {
+    throw new Error("Nessuna traccia corrente trovata. Incolla un link/URI di traccia in A).");
+  }
+  const id = data.item.id;
+  return {
+    trackUri: `spotify:track:${id}`,
+    trackUrl: `https://open.spotify.com/track/${id}`
+  };
+}
+
+/** Avvia la pipeline: testo → TTS → al termine PLAY della traccia su Spotify */
+async function autoIntroThenPlay() {
+  setError("");
+  const btn = $("#btnAutoPlay");
+  const btnStop = $("#btnAutoStop");
+  btn.disabled = true; btnStop.disabled = false; const oldLabel = btn.textContent; btn.textContent = "Preparazione...";
+
+  try {
+    // Garantisce token e device pronti
+    await getValidToken();
+    if (!player || !deviceId) {
+      // Se il player non è pronto, lo inizializziamo e trasferiamo playback
+      await initPlayer();
+      if (deviceId) { await transferPlayback(deviceId, false); }
+    }
+
+    // 1) Risolvi traccia (URI + URL “aperto” per il tuo backend testo)
+    btn.textContent = "Lettura traccia...";
+    const { trackUri, trackUrl } = await resolveTrackForAuto();
+
+    // 2) Genera testo intro dalla traccia
+    btn.textContent = "Generazione testo...";
+    const intro = await apiIntroText(trackUrl);
+    // Mostriamo anche nell’area B) per trasparenza/QA
+    $("#generatedText").value = intro;
+
+    // 3) TTS dell’intro
+    btn.textContent = "Sintesi vocale...";
+    const lang = $("#langIntro")?.value || "it";
+    const voice = $("#voiceId")?.value?.trim() || undefined;
+    const mp3 = await apiTTS(intro, lang, voice);
+
+    // 4) Riproduci TTS ⇒ solo a fine parlato avvia il brano
+    btn.textContent = "Parlato in riproduzione...";
+    await playBlobAndThen(mp3, async () => {
+      // Avvia la traccia su Spotify DOPO la fine del TTS
+      const body = { uris: [trackUri] };
+      await apiSpotify(`me/player/play?device_id=${encodeURIComponent(deviceId)}`, "PUT", body);
+      log("▶️ Brano avviato dopo intro.");
+    });
+
+    btn.textContent = "Fatto ✅";
+  } catch (e) {
+    setError(e.message || "Errore nel pilot automatico");
+    btn.textContent = "Errore";
+  } finally {
+    setTimeout(() => { btn.textContent = oldLabel; btn.disabled = false; btnStop.disabled = false; }, 800);
+  }
+}
+
+/** Stop totale: ferma TTS e pausa Spotify */
+async function autoStopAll() {
+  try { audioEl.pause(); audioEl.currentTime = 0; } catch(_) {}
+  try { await apiSpotify("me/player/pause","PUT"); } catch(_) {}
+  log("Stop eseguito.");
+}
+
+// Bind pulsanti Pilot automatico
+$("#btnAutoPlay").addEventListener("click", () => autoIntroThenPlay().catch(e => setError(e.message)));
+$("#btnAutoStop").addEventListener("click", () => autoStopAll().catch(e => setError(e.message)));
+
+
 </script>
 </body>
 </html>
