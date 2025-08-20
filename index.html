@@ -1,67 +1,69 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8" />
-  <title>Custom Motel Radio — FE</title>
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Custom Motel Radio — Player + TTS</title>
+
+  <!-- Razionale: lo Spotify Web Playback SDK richiede HTTPS e account Premium. -->
+  <script defer src="https://sdk.scdn.co/spotify-player.js"></script>
+
   <style>
-    /* UI minimale e leggibile */
+    /* UI compatta e leggibile */
     :root { font-family: ui-sans-serif, system-ui, Arial, sans-serif; }
-    body { max-width: 860px; margin: 24px auto; padding: 0 12px; }
+    body { max-width: 980px; margin: 24px auto; padding: 0 12px; }
     h1 { margin-bottom: 8px; }
-    section { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 16px 0; }
+    section { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin: 16px 0; }
     label { font-weight: 600; display: inline-block; margin: 8px 0 4px; }
     input[type="text"], input[type="url"], textarea, select {
-      width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 8px;
+      width: 100%; padding: 10px; border: 1px solid #d1d5db; border-radius: 10px;
     }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     button {
-      padding: 8px 14px; border: 0; border-radius: 8px; cursor: pointer; background: #111; color: #fff;
+      padding: 10px 14px; border: 0; border-radius: 10px; cursor: pointer; background: #111827; color: #fff;
     }
-    button[disabled] { opacity: .6; cursor: not-allowed; }
+    button.secondary { background:#fff; color:#111827; border:1px solid #9ca3af; }
+    button[disabled] { opacity:.6; cursor:not-allowed; }
+    .muted { color:#6b7280; }
     #error { margin: 8px 0; color: #a40000; min-height: 1.2em; }
     #player { width: 100%; margin-top: 8px; }
-    small.hint { color: #555; }
+    .status { padding: 8px 12px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9rem; white-space: pre-wrap; }
   </style>
 </head>
 <body>
-  <h1>Custom Motel Radio</h1>
-  <p class="hint">FE “stateless”: genera il <strong>testo</strong> dell’intro → lo passa a <strong>/api/tts</strong> → riproduce l’MP3.</p>
+  <h1>Custom Motel Radio — Player Spotify + Intro TTS</h1>
+  <p class="muted">Flow tipico: 1) Login → 2) Avvia player → 3) Incolla link/URI → 4) (opz.) Genera intro + TTS.</p>
 
-  <!-- ====== SEZIONE A: TTS LIBERO (testo → MP3) ====== -->
-  <section aria-labelledby="sec-free-tts">
-    <h2 id="sec-free-tts">A) TTS libero</h2>
-    <label for="freeText">Testo</label>
-    <textarea id="freeText" rows="3">Hello from Motel Radio frontend test.</textarea>
-
+  <!-- ====== SEZIONE SPOTIFY: Login + Player ====== -->
+  <section aria-labelledby="sec-spotify">
+    <h2 id="sec-spotify">A) Spotify (PKCE + Web Playback SDK)</h2>
     <div class="row">
-      <div style="flex:1 1 260px">
-        <label for="voiceId">Voice ID (opzionale)</label>
-        <input id="voiceId" type="text" placeholder="Lascia vuoto per usare il default del backend" />
-      </div>
-      <div>
-        <label for="langFree">Lingua TTS</label>
-        <select id="langFree">
-          <option value="it">Italiano</option>
-          <option value="en" selected>English</option>
-        </select>
-      </div>
+      <button id="loginBtn">Accedi con Spotify</button>
+      <button id="logoutBtn" class="secondary">Logout</button>
+      <button id="connectBtn">Avvia Player</button>
     </div>
 
-    <div class="row" style="margin-top:8px;">
-      <button id="btnTtsFree">Genera TTS</button>
+    <div class="row" style="margin-top:10px;">
+      <input id="uriInput" type="text" placeholder="Incolla link open.spotify.com/… o URI (spotify:track/album/playlist:...)" />
+      <button id="playBtn">Play</button>
+      <button id="pauseBtn" class="secondary">Pause</button>
+      <button id="nextBtn" class="secondary">Next ▶▶</button>
+      <button id="prevBtn" class="secondary">◀◀ Prev</button>
     </div>
+
+    <div class="muted" style="margin-top:10px;">Device ID: <span id="deviceId">—</span></div>
+    <div id="status" class="status" style="margin-top:10px;">Pronto.</div>
   </section>
 
-  <!-- ====== SEZIONE B: INTRO DA LINK SPOTIFY (singola traccia) ====== -->
-  <section aria-labelledby="sec-spotify">
-    <h2 id="sec-spotify">B) Intro da link Spotify (singola traccia)</h2>
+  <!-- ====== SEZIONE INTRO + TTS ====== -->
+  <section aria-labelledby="sec-intro">
+    <h2 id="sec-intro">B) Intro parlata per la traccia corrente</h2>
+    <p class="muted">Incolla il link esatto della traccia (non playlist/album) → genera testo → invialo al TTS.</p>
 
     <label for="trackUrl">Link Spotify della traccia</label>
     <input id="trackUrl" type="url" placeholder="https://open.spotify.com/track/..." />
 
     <div class="row" style="margin-top:8px;">
-      <!-- Flusso “stateless”: prima solo testo (plain), poi TTS -->
       <button id="btnOnlyText">1) Genera solo testo</button>
       <button id="btnTextAndTts">2) Testo + TTS</button>
       <div>
@@ -71,189 +73,365 @@
           <option value="en">English</option>
         </select>
       </div>
+      <div>
+        <label for="voiceId" style="margin:0 0 0 8px;">Voice ID (opz.)</label>
+        <input id="voiceId" type="text" placeholder="Lascia vuoto per usare il default del backend" style="min-width:260px;" />
+      </div>
     </div>
 
-    <label for="generatedText" style="margin-top:10px;">Testo generato (anteprima)</label>
+    <label for="generatedText" style="margin-top:10px;">Anteprima testo generato</label>
     <textarea id="generatedText" rows="3" readonly></textarea>
-    <small class="hint">Questo è il testo che verrà passato a /api/tts. Puoi copiarlo e modificarlo per prove manuali in A).</small>
+    <small class="muted">È esattamente il testo che invieremo a <code>/api/tts</code>. Puoi editarlo e lanciare il TTS manualmente con la sezione C.</small>
   </section>
 
-  <!-- ====== AREA ERRORI + PLAYER ====== -->
+  <!-- ====== SEZIONE TTS LIBERO ====== -->
+  <section aria-labelledby="sec-free-tts">
+    <h2 id="sec-free-tts">C) TTS libero (testo → MP3)</h2>
+    <label for="freeText">Testo</label>
+    <textarea id="freeText" rows="3">Hello from Motel Radio frontend test.</textarea>
+
+    <div class="row" style="margin-top:8px;">
+      <div>
+        <label for="langFree" style="margin:0;">Lingua TTS</label>
+        <select id="langFree">
+          <option value="it">Italiano</option>
+          <option value="en" selected>English</option>
+        </select>
+      </div>
+      <button id="btnTtsFree">Genera TTS</button>
+    </div>
+  </section>
+
+  <!-- ====== Errori + Player audio TTS ====== -->
   <div id="error" role="alert" aria-live="polite"></div>
   <audio id="player" controls></audio>
 
-  <script>
-  // ============================
-  // CONFIG BASE BACKEND
-  // ============================
-  /**
-   * Razionale: in locale usa localhost:8000, su GitHub Pages usa Render.
-   * Evita di toccare a mano il codice quando testi in locale.
-   */
-  const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
-  const BASE = isLocal
-    ? "http://127.0.0.1:8000"              // dev locale
-    : "https://motel-ai-radio.onrender.com"; // prod (Pages → Render)
+<script>
+/* ========================================================================
+   CONFIG DI BASE (BE & Spotify)
+   ------------------------------------------------------------------------
+   Razionale:
+   - BASE: in locale punta a http://127.0.0.1:8000, in produzione al tuo Render.
+   - REDIRECT_URI: usiamo location.origin + location.pathname per combaciare
+     *esattamente* con la pagina GitHub Pages (evita mismatch su /repo/index.html).
+   ======================================================================== */
+const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+const BASE = isLocal ? "http://127.0.0.1:8000" : "https://motel-ai-radio.onrender.com";
 
-  // ----------------------------
-  // Helper DOM + UX
-  // ----------------------------
-  const $ = (sel) => document.querySelector(sel);
-  const player = $("#player");         // unico <audio> in pagina
-  const errBox = $("#error");          // <div id="error"> per messaggi
+/*** Spotify OAuth + SDK ***/
+const CLIENT_ID = "bc3377239f1c4201bbb4769622a71a43"; // usa il tuo Client ID
+const REDIRECT_URI = location.origin + location.pathname; // es. https://user.github.io/repo/index.html
+const SCOPES = [
+  "streaming","user-read-email","user-read-private",
+  "user-read-playback-state","user-modify-playback-state","user-read-currently-playing"
+];
 
-  function setError(msg) {
-    // Visualizza eventuali messaggi d'errore
-    errBox && (errBox.textContent = msg || "");
+/*** Helpers UI ***/
+const $  = (sel) => document.querySelector(sel);
+const log = (m) => { $("#status").textContent = '['+ new Date().toLocaleTimeString() +'] '+ m; };
+const setError = (msg) => { $("#error").textContent = msg || ""; };
+
+/*** PKCE utilities ***/
+async function sha256(plain){ const e = new TextEncoder().encode(plain); return await crypto.subtle.digest("SHA-256", e); }
+function b64u(a){ return btoa(String.fromCharCode(...new Uint8Array(a))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function randStr(n=64){ const a=new Uint8Array(n); crypto.getRandomValues(a); return b64u(a); }
+
+/*** OAuth: login / exchange / refresh ***/
+async function login(){
+  // 1) Genera challenge PKCE e reindirizza a /authorize
+  const verifier = randStr(64);
+  const challenge = b64u(await sha256(verifier));
+  localStorage.setItem("pkce_verifier", verifier);
+
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPES.join(" "),
+    code_challenge_method: "S256",
+    code_challenge: challenge
+  });
+  window.location = `https://accounts.spotify.com/authorize?${params.toString()}`;
+}
+
+async function exchangeToken(code){
+  // 2) Scambia "code" con access/refresh token
+  const verifier = localStorage.getItem("pkce_verifier");
+  const body = new URLSearchParams({
+    client_id: CLIENT_ID, grant_type: "authorization_code",
+    code, redirect_uri: REDIRECT_URI, code_verifier: verifier
+  });
+  const r = await fetch("https://accounts.spotify.com/api/token", {
+    method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body
+  });
+  if(!r.ok){ throw new Error("Token exchange failed: " + (await r.text())); }
+  const d = await r.json();
+  const expiry = Date.now() + (d.expires_in - 60) * 1000;
+  localStorage.setItem("access_token", d.access_token);
+  localStorage.setItem("refresh_token", d.refresh_token || "");
+  localStorage.setItem("token_expiry", String(expiry));
+  log("Access token ottenuto.");
+}
+
+async function refreshToken(){
+  const rt = localStorage.getItem("refresh_token");
+  if(!rt) throw new Error("No refresh token");
+  const body = new URLSearchParams({ client_id: CLIENT_ID, grant_type:"refresh_token", refresh_token: rt });
+  const r = await fetch("https://accounts.spotify.com/api/token", {
+    method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body
+  });
+  if(!r.ok){ throw new Error("Refresh failed: " + (await r.text())); }
+  const d = await r.json();
+  const expiry = Date.now() + (d.expires_in - 60) * 1000;
+  localStorage.setItem("access_token", d.access_token);
+  localStorage.setItem("token_expiry", String(expiry));
+  log("Access token refresh OK.");
+}
+
+function getCachedToken(){
+  const at = localStorage.getItem("access_token");
+  const exp = Number(localStorage.getItem("token_expiry") || 0);
+  if(!at) return null; if(Date.now() > exp) return null; return at;
+}
+
+async function getValidToken(){
+  // Gestisce il ritorno da login (?code=...) + cache/refresh
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get("code");
+  if(code){
+    history.replaceState({}, "", REDIRECT_URI); // pulizia URL
+    await exchangeToken(code);
   }
+  const cached = getCachedToken();
+  if(cached) return cached;
+  const rt = localStorage.getItem("refresh_token");
+  if(rt){ await refreshToken(); return localStorage.getItem("access_token"); }
+  throw new Error('Nessun token. Premi "Accedi con Spotify".');
+}
 
-  function isValidTrackUrl(u) {
-    // Accetta URL con o senza intl-xx e URI spotify:track:ID
-    return /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?track\//.test(u)
-        || /^spotify:track:[A-Za-z0-9]{22}$/.test(u);
-  }
+/*** Web Playback SDK ***/
+let player, deviceId = null, lastVolume = 0.8;
 
-  async function playBlob(blob) {
-    // Collega il Blob MP3 al player e riproduci
-    const url = URL.createObjectURL(blob);
-    player.src = url;
-    try { await player.play(); } catch (_) {}
-    player.onended = () => URL.revokeObjectURL(url);
-  }
+window.onSpotifyWebPlaybackSDKReady = () => { log("Web Playback SDK pronto."); };
 
-  // ----------------------------
-  // API wrappers (FE → BE)
-  // ----------------------------
-
-  async function apiIntroText(trackUrl) {
-    /**
-     * Chiede l’introduzione all’endpoint "solo testo".
-     * RITORNA SEMPRE UNA STRINGA:
-     * - se il BE risponde JSON, estrae .text
-     * - se il BE risponde text/plain, usa direttamente il body
-     */
-    const res = await fetch(`${BASE}/api/intro-from-track-text?debug=0`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ track_url: trackUrl }), // chiave corretta per il BE
-    });
-
-    if (!res.ok) {
-      // mostriamo il body d'errore del BE per debug rapido
-      throw new Error(await res.text());
-    }
-
-    const ct = res.headers.get("content-type") || "";
-
-    if (ct.includes("application/json")) {
-      // Se è JSON, estrai la sola proprietà 'text'
-      const data = await res.json();
-      if (data && typeof data.text === "string") {
-        return data.text.trim();
-      }
-      // Fallback: non dovrebbe capitare, ma evitiamo che arrivi [object Object] al TTS
-      throw new Error("Risposta JSON inattesa: manca 'text'.");
-    }
-
-    // text/plain: usa direttamente il body grezzo
-    return (await res.text()).trim();
-  }
-
-  async function apiTTS(text, language_code, voiceId) {
-    /**
-     * Invia il testo a /api/tts e ritorna un Blob MP3.
-     * La chiave di ElevenLabs resta al sicuro nel backend.
-     */
-    // Pre-normalizzazione (migliora la resa TTS radiofonica)
-    const clean = String(text).replace(/\s+/g, " ").trim();
-
-    const payload = { text: clean, language_code };
-    if (voiceId) payload.voiceId = voiceId; // opzionale
-
-    const res = await fetch(`${BASE}/api/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-
-    const ct = res.headers.get("content-type") || "";
-    if (!res.ok || !ct.includes("audio/mpeg")) {
-      // Se il BE risponde errore o un mimetype diverso, mostriamo il body per capire il motivo
-      throw new Error(`TTS error ${res.status}: ${await res.text()}`);
-    }
-    return res.blob(); // Blob MP3
-  }
-
-  // ============================
-  // A) TTS LIBERO (testo → MP3)
-  // ============================
-  $("#btnTtsFree")?.addEventListener("click", async () => {
-    setError("");
-    const btn = $("#btnTtsFree");
-    const text = $("#freeText")?.value?.trim() || "";
-    const voiceId = $("#voiceId")?.value?.trim();
-    const lang = $("#langFree")?.value || "en";
-
-    if (!text) { setError("Inserisci del testo."); return; }
-
-    btn.disabled = true; const old = btn.textContent; btn.textContent = "Generazione...";
-    try {
-      const mp3 = await apiTTS(text, lang, voiceId || undefined);
-      await playBlob(mp3);
-    } catch (e) {
-      setError(e.message || "Errore TTS");
-    } finally {
-      btn.disabled = false; btn.textContent = old;
-    }
+async function initPlayer(){
+  // Inizializza il player con token valido
+  const token = await getValidToken();
+  player = new Spotify.Player({
+    name: "Custom Motel Radio (PKCE)",
+    getOAuthToken: cb => cb(token),
+    volume: lastVolume
   });
 
-  // ============================================
-  // B1) INTRO DA SPOTIFY — SOLO TESTO (plain)
-  // ============================================
-  $("#btnOnlyText")?.addEventListener("click", async () => {
-    setError("");
-    const btn = $("#btnOnlyText");
-    const link = $("#trackUrl")?.value?.trim() || "";
+  // Eventi utili per stato device
+  player.addListener("ready", ({ device_id }) => {
+    deviceId = device_id;
+    $("#deviceId").textContent = deviceId;
+    log("Player pronto. Device: " + deviceId);
+    transferPlayback(deviceId, false).catch(e => log(e.message));
+  });
+  player.addListener("not_ready", ({ device_id }) => log("Device non pronto: " + device_id));
+  player.addListener("initialization_error", ({ message }) => log("Init error: " + message));
+  player.addListener("authentication_error", ({ message }) => log("Auth error: " + message));
+  player.addListener("account_error", ({ message }) => log("Account error (serve Premium): " + message));
 
-    if (!isValidTrackUrl(link)) { setError("Inserisci un link Spotify valido a UNA traccia."); return; }
+  const ok = await player.connect();
+  log(ok ? "Player connesso." : "Player non connesso.");
+}
 
-    btn.disabled = true; const old = btn.textContent; btn.textContent = "Generazione testo...";
-    try {
-      const intro = await apiIntroText(link);                // ← stringa PULITA
-      $("#generatedText").value = intro;                     // anteprima SOLO testo
-    } catch (e) {
-      setError(e.message || "Errore generazione testo");
-    } finally {
-      btn.disabled = false; btn.textContent = old;
-    }
+async function apiSpotify(path, method="GET", body){
+  // Wrapper REST Spotify: usa sempre un token valido
+  const token = await getValidToken();
+  const r = await fetch(`https://api.spotify.com/v1/${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, "Content-Type":"application/json" },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!r.ok){ const t = await r.text(); throw new Error(`${method} ${path} → ${r.status}: ${t}`); }
+  return r.status === 204 ? null : r.json();
+}
+
+async function transferPlayback(id, play=false){
+  log("Trasferimento playback…");
+  await apiSpotify("me/player", "PUT", { device_ids: [id], play });
+}
+
+/*** Parser input Spotify (link open.spotify.com o URI spotify:...) ***/
+function parseSpotifyInput(raw) {
+  if (!raw) return null;
+  raw = raw.trim();
+
+  // URI nativa
+  if (raw.startsWith("spotify:")) {
+    if (raw.startsWith("spotify:track:")) return { type:"track", uri:raw };
+    if (raw.startsWith("spotify:album:")) return { type:"album", context_uri:raw };
+    if (raw.startsWith("spotify:playlist:")) return { type:"playlist", context_uri:raw };
+    if (raw.startsWith("spotify:artist:")) return { type:"artist", context_uri:raw };
+    return { type:"track", uri:raw };
+  }
+
+  // URL open.spotify.com
+  try {
+    const u = new URL(raw);
+    if (!u.hostname.includes("open.spotify.com")) return null;
+    const parts = u.pathname.split("/").filter(Boolean); // gestisce eventuale /intl-it/
+    const type = parts[0];
+    const id = (parts[1] || "").split("?")[0];
+
+    if (!id) return null;
+    if (type === "track")    return { type:"track",    uri: `spotify:track:${id}` };
+    if (type === "album")    return { type:"album",    context_uri: `spotify:album:${id}` };
+    if (type === "playlist") return { type:"playlist", context_uri: `spotify:playlist:${id}` };
+
+    if (/^[A-Za-z0-9]{22,}$/.test(id)) return { type:"track", uri:`spotify:track:${id}` };
+    return null;
+  } catch {
+    const m = raw.match(/([A-Za-z0-9]{22,})/);
+    if (m) return { type:"track", uri:`spotify:track:${m[1]}` };
+    return null;
+  }
+}
+
+/*** Comandi player ***/
+async function playUri(){
+  if (!deviceId) throw new Error("Device non pronto");
+  const parsed = parseSpotifyInput($("#uriInput").value);
+  if (!parsed) { log("Input non riconosciuto. Incolla link/URI Spotify valido."); return; }
+  const body = parsed.uri ? { uris:[parsed.uri] } : { context_uri: parsed.context_uri };
+  await apiSpotify(`me/player/play?device_id=${encodeURIComponent(deviceId)}`, "PUT", body);
+  log("▶️ Playing: " + (parsed.uri || parsed.context_uri));
+}
+async function pause(){ await apiSpotify("me/player/pause","PUT"); log("⏸ Pausa."); }
+async function nextTrack(){ await apiSpotify("me/player/next","POST"); log("⏭ Next"); }
+async function prevTrack(){ await apiSpotify("me/player/previous","POST"); log("⏮ Prev"); }
+
+/* ========================================================================
+   API verso il tuo Backend (Intro testo + TTS)
+   ------------------------------------------------------------------------
+   Razionale:
+   - apiIntroText ritorna SEMPRE una stringa pulita (estrae .text dal JSON).
+   - apiTTS ritorna un Blob audio/mpeg che riproduciamo nell'<audio>.
+   - playBlob fa ducking automatico del player Spotify durante il parlato.
+   ======================================================================== */
+const audioEl = $("#player");
+
+function isValidTrackUrl(u) {
+  return /open\.spotify\.com\/(?:intl-[a-z]{2}\/)?track\//.test(u)
+      || /^spotify:track:[A-Za-z0-9]{22}$/.test(u);
+}
+
+async function apiIntroText(trackUrl) {
+  const res = await fetch(`${BASE}/api/intro-from-track-text?debug=0`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ track_url: trackUrl })
+  });
+  if (!res.ok) throw new Error(await res.text());
+
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const data = await res.json();
+    if (data && typeof data.text === "string") return data.text.trim();
+    throw new Error("Risposta JSON inattesa: manca 'text'.");
+  }
+  return (await res.text()).trim();
+}
+
+async function apiTTS(text, language_code, voiceId) {
+  const clean = String(text).replace(/\s+/g, " ").trim();
+  const payload = { text: clean, language_code };
+  if (voiceId) payload.voiceId = voiceId;
+
+  const res = await fetch(`${BASE}/api/tts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 
-  // ==================================================
-  // B2) INTRO DA SPOTIFY — TESTO + TTS (pipeline)
-  // ==================================================
-  $("#btnTextAndTts")?.addEventListener("click", async () => {
-    setError("");
-    const btn = $("#btnTextAndTts");
-    const link = $("#trackUrl")?.value?.trim() || "";
-    const lang = $("#langIntro")?.value || "it";
+  const ct = res.headers.get("content-type") || "";
+  if (!res.ok || !ct.includes("audio/mpeg")) {
+    throw new Error(`TTS error ${res.status}: ${await res.text()}`);
+  }
+  return res.blob();
+}
 
-    if (!isValidTrackUrl(link)) { setError("Inserisci un link Spotify valido a UNA traccia."); return; }
+async function playBlobWithDucking(blob){
+  // Crea URL temporaneo e riproduci l’MP3.
+  const url = URL.createObjectURL(blob);
+  audioEl.src = url;
 
-    btn.disabled = true; const old = btn.textContent; btn.textContent = "Intro + TTS...";
-    try {
-      // 1) Ottieni SOLO testo (estrae .text se il BE manda JSON)
-      const intro = await apiIntroText(link);
-      $("#generatedText").value = intro;     // mostra cosa invierai a 11Labs
-
-      // 2) Invio a /api/tts e riproduzione
-      const mp3 = await apiTTS(intro, lang /* voiceId opzionale qui se vuoi forzare */);
-      await playBlob(mp3);
-    } catch (e) {
-      setError(e.message || "Errore intro/TTS");
-    } finally {
-      btn.disabled = false; btn.textContent = old;
+  // Ducking: abbassa volume Spotify mentre parla il TTS, poi ripristina.
+  let prevVol = lastVolume;
+  try {
+    if (player) {
+      try { prevVol = await player.getVolume(); } catch(_) {}
+      await player.setVolume(Math.max(0.05, prevVol * 0.25));
     }
-  });
+  } catch(_){ /* ignora errori di ducking */ }
+
+  try { await audioEl.play(); } catch(_) {}
+
+  audioEl.onended = async () => {
+    URL.revokeObjectURL(url);
+    if (player) {
+      try {
+        await player.setVolume(prevVol);
+        lastVolume = prevVol;
+      } catch(_) {}
+    }
+  };
+}
+
+/* ========================================================================
+   UI bindings
+   ======================================================================== */
+$("#loginBtn").addEventListener("click", ()=> login().catch(e => setError(e.message)));
+$("#logoutBtn").addEventListener("click", ()=> { localStorage.clear(); log("Logout. Fai di nuovo Login."); });
+$("#connectBtn").addEventListener("click", ()=> initPlayer().catch(e => setError(e.message)));
+
+$("#playBtn").addEventListener("click", ()=> playUri().catch(e => setError(e.message)));
+$("#pauseBtn").addEventListener("click", ()=> pause().catch(e => setError(e.message)));
+$("#nextBtn").addEventListener("click", ()=> nextTrack().catch(e => setError(e.message)));
+$("#prevBtn").addEventListener("click", ()=> prevTrack().catch(e => setError(e.message)));
+
+$("#btnOnlyText").addEventListener("click", async () => {
+  setError("");
+  const link = $("#trackUrl").value.trim();
+  if (!isValidTrackUrl(link)) { setError("Inserisci un link Spotify valido a UNA traccia."); return; }
+
+  const btn = $("#btnOnlyText"); btn.disabled = true; const old = btn.textContent; btn.textContent = "Generazione testo...";
+  try {
+    const intro = await apiIntroText(link);
+    $("#generatedText").value = intro;    // Mostra solo il testo (quello che passerai a /api/tts)
+  } catch (e) {
+    setError(e.message || "Errore generazione testo");
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+});
+
+$("#btnTextAndTts").addEventListener("click", async () => {
+  setError("");
+  const link = $("#trackUrl").value.trim();
+  const lang = $("#langIntro").value || "it";
+  const voiceId = $("#voiceId").value.trim() || undefined;
+
+  if (!isValidTrackUrl(link)) { setError("Inserisci un link Spotify valido a UNA traccia."); return; }
+
+  const btn = $("#btnTextAndTts"); btn.disabled = true; const old = btn.textContent; btn.textContent = "Intro + TTS...";
+  try {
+    const intro = await apiIntroText(link);
+    $("#generatedText").value = intro;        // anteprima
+    const mp3 = await apiTTS(intro, lang, voiceId);
+    await playBlobWithDucking(mp3);           // riproduci con ducking del player Spotify
+  } catch (e) {
+    setError(e.message || "Errore intro/TTS");
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+});
+
+/* All’avvio: se torni da login con ?code=..., sarà gestito dentro getValidToken() quando inizializzi il player. */
 </script>
 </body>
 </html>
