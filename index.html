@@ -86,7 +86,14 @@
   // ============================
   // CONFIG BASE BACKEND
   // ============================
-  const BASE = "http://localhost:8000"; // cambia se il backend è altrove
+  /**
+   * Razionale: in locale usa localhost:8000, su GitHub Pages usa Render.
+   * Evita di toccare a mano il codice quando testi in locale.
+   */
+  const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+  const BASE = isLocal
+    ? "http://127.0.0.1:8000"              // dev locale
+    : "https://motel-ai-radio.onrender.com"; // prod (Pages → Render)
 
   // ----------------------------
   // Helper DOM + UX
